@@ -43,6 +43,8 @@ const { AuthMiddleware } = require('./lib/auth');
 const { WorkplanStore } = require('./lib/workplan-store');
 const { InfrastructureRegistry } = require('./lib/infrastructure-registry');
 const { registerInfraRoutes } = require('./lib/infra-routes');
+const { AgentStore } = require('./lib/agent-store');
+const { KanbanStore } = require('./lib/kanban-store');
 const log = require('./lib/logger');
 
 const dev = process.env.NODE_ENV !== 'production';
@@ -71,6 +73,8 @@ const watchdog = new AgentWatchdog(connector, db, {
   slackWebhookUrl: process.env.MC_WATCHDOG_SLACK_URL || null,
 });
 const infraRegistry = new InfrastructureRegistry(db, process.env.MC_VAULT_KEY);
+const agentStore = new AgentStore(db);
+const kanbanStore = new KanbanStore(db);
 
 // Periodic lease cleanup
 setInterval(() => infraRegistry.cleanupExpiredLeases(), 3600000);
@@ -400,6 +404,118 @@ app.prepare().then(() => {
       if (pathname.startsWith('/api/infra/') || pathname.startsWith('/api/vault/')) {
         const handled = registerInfraRoutes(pathname, req, res, infraRegistry, auth);
         if (handled) return;
+      }
+
+      // ─── Managed Agents ─────────────────────────────────
+      if (pathname === '/api/agents' && req.method === 'GET') {
+        return json(res, 200, agentStore.listAgents());
+      }
+      if (pathname === '/api/agents' && req.method === 'POST') {
+        return readBody(req, (body) => {
+          try { json(res, 201, agentStore.createAgent(body)); }
+          catch (e) { json(res, 400, { error: e.message }); }
+        });
+      }
+      if (pathname.match(/^\/api\/agents\/[^/]+$/) && req.method === 'GET') {
+        const id = pathname.split('/').pop();
+        const agent = agentStore.getAgent(id);
+        return agent ? json(res, 200, agent) : json(res, 404, { error: 'Not found' });
+      }
+      if (pathname.match(/^\/api\/agents\/[^/]+$/) && req.method === 'PATCH') {
+        const id = pathname.split('/').pop();
+        return readBody(req, (body) => {
+          const agent = agentStore.updateAgent(id, body);
+          agent ? json(res, 200, agent) : json(res, 404, { error: 'Not found' });
+        });
+      }
+      if (pathname.match(/^\/api\/agents\/[^/]+$/) && req.method === 'DELETE') {
+        const id = pathname.split('/').pop();
+        agentStore.deleteAgent(id);
+        return json(res, 200, { ok: true });
+      }
+      if (pathname.match(/^\/api\/agents\/[^/]+\/start$/) && req.method === 'POST') {
+        agentStore.startAgent(pathname.split('/')[3]);
+        return json(res, 200, { ok: true });
+      }
+      if (pathname.match(/^\/api\/agents\/[^/]+\/pause$/) && req.method === 'POST') {
+        agentStore.pauseAgent(pathname.split('/')[3]);
+        return json(res, 200, { ok: true });
+      }
+      if (pathname.match(/^\/api\/agents\/[^/]+\/stop$/) && req.method === 'POST') {
+        agentStore.stopAgent(pathname.split('/')[3]);
+        return json(res, 200, { ok: true });
+      }
+      if (pathname.match(/^\/api\/agents\/[^/]+\/restart$/) && req.method === 'POST') {
+        agentStore.restartAgent(pathname.split('/')[3]);
+        return json(res, 200, { ok: true });
+      }
+      if (pathname.match(/^\/api\/agents\/[^/]+\/activate$/) && req.method === 'POST') {
+        agentStore.activateAgent(pathname.split('/')[3]);
+        return json(res, 200, { ok: true });
+      }
+
+      // ─── Managed Gateways ───────────────────────────────
+      if (pathname === '/api/managed-gateways' && req.method === 'GET') {
+        return json(res, 200, agentStore.listGateways());
+      }
+      if (pathname === '/api/managed-gateways' && req.method === 'POST') {
+        return readBody(req, (body) => {
+          try { json(res, 201, agentStore.createGateway(body)); }
+          catch (e) { json(res, 400, { error: e.message }); }
+        });
+      }
+      if (pathname.match(/^\/api\/managed-gateways\/[^/]+$/) && req.method === 'PATCH') {
+        const id = pathname.split('/').pop();
+        return readBody(req, (body) => {
+          const gw = agentStore.updateGateway(id, body);
+          gw ? json(res, 200, gw) : json(res, 404, { error: 'Not found' });
+        });
+      }
+      if (pathname.match(/^\/api\/managed-gateways\/[^/]+$/) && req.method === 'DELETE') {
+        agentStore.deleteGateway(pathname.split('/').pop());
+        return json(res, 200, { ok: true });
+      }
+
+      // ─── Kanban ─────────────────────────────────────────
+      if (pathname === '/api/kanban/boards' && req.method === 'GET') {
+        return json(res, 200, kanbanStore.listBoards());
+      }
+      if (pathname.match(/^\/api\/kanban\/boards\/[^/]+$/) && req.method === 'GET') {
+        const board = kanbanStore.getFullBoard(pathname.split('/').pop());
+        return board ? json(res, 200, board) : json(res, 404, { error: 'Not found' });
+      }
+      if (pathname === '/api/kanban/boards' && req.method === 'POST') {
+        return readBody(req, (body) => {
+          json(res, 201, kanbanStore.createBoard(body.name, body.description));
+        });
+      }
+      if (pathname === '/api/kanban/cards' && req.method === 'POST') {
+        return readBody(req, (body) => {
+          try {
+            const card = kanbanStore.createCard(body.boardId, body.columnId, body);
+            json(res, 201, card);
+          } catch (e) { json(res, 400, { error: e.message }); }
+        });
+      }
+      if (pathname.match(/^\/api\/kanban\/cards\/[^/]+$/) && req.method === 'PATCH') {
+        const id = pathname.split('/').pop();
+        return readBody(req, (body) => {
+          const card = kanbanStore.updateCard(id, body);
+          card ? json(res, 200, card) : json(res, 404, { error: 'Not found' });
+        });
+      }
+      if (pathname.match(/^\/api\/kanban\/cards\/[^/]+\/move$/) && req.method === 'POST') {
+        const id = pathname.split('/')[4];
+        return readBody(req, (body) => {
+          try {
+            const card = kanbanStore.moveCard(id, body.columnId, body.order);
+            json(res, 200, card);
+          } catch (e) { json(res, 400, { error: e.message }); }
+        });
+      }
+      if (pathname.match(/^\/api\/kanban\/cards\/[^/]+$/) && req.method === 'DELETE') {
+        kanbanStore.deleteCard(pathname.split('/').pop());
+        return json(res, 200, { ok: true });
       }
 
       // ─── Next.js fallthrough ───────────────────────────
