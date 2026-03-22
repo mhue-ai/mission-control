@@ -22,14 +22,12 @@ step() { echo -e "\n${C}--- $1${N}"; }
 # ═══════════════════════════════════════════════════════════════════════
 MODE=""
 
-# Allow passing mode as argument: install.sh --clean or install.sh --upgrade
 if [[ "${1:-}" == "--clean" ]]; then
   MODE="clean"
 elif [[ "${1:-}" == "--upgrade" ]]; then
   MODE="upgrade"
 fi
 
-# Auto-detect if existing install is present
 EXISTING=false
 if [ -f "$DIR/server.js" ] && [ -f "$DIR/.env" ]; then
   EXISTING=true
@@ -44,7 +42,7 @@ if [ -z "$MODE" ]; then
     printf "  \033[1;33mExisting installation detected at $DIR\033[0m\n"
     echo ""
     printf "  \033[1m1)\033[0m Clean install   — wipes everything, fresh start\n"
-    printf "  \033[1m2)\033[0m Upgrade         — updates code only, keeps config + data\n"
+    printf "  \033[1m2)\033[0m Upgrade         — fresh code pull, keeps config + data\n"
     echo ""
     printf "  Select [1/2]: "
     read -r choice < /dev/tty
@@ -64,7 +62,24 @@ echo -e "  Mode: ${B}${MODE}${N}   Target: $DIR   User: $ME"
 echo ""
 
 # ═══════════════════════════════════════════════════════════════════════
-# UPGRADE PATH — preserve .env, data/, certs, firewall, credentials
+# Shared: System packages (both paths need these)
+# ═══════════════════════════════════════════════════════════════════════
+step "System packages"
+sudo apt-get update -qq -y < /dev/null
+sudo apt-get install -y -qq curl wget git build-essential openssl sqlite3 ufw nginx < /dev/null
+ok "apt packages"
+
+if ! command -v node &>/dev/null || [[ "$(node -v)" != v22* ]]; then
+  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - < /dev/null
+  sudo apt-get install -y -qq nodejs < /dev/null
+fi
+ok "node $(node -v)"
+
+sudo npm install -g pm2 --loglevel=error 2>/dev/null || true
+ok "pm2"
+
+# ═══════════════════════════════════════════════════════════════════════
+# UPGRADE PATH
 # ═══════════════════════════════════════════════════════════════════════
 if [ "$MODE" = "upgrade" ]; then
 
@@ -72,89 +87,69 @@ if [ "$MODE" = "upgrade" ]; then
     die "No existing installation at $DIR. Run a clean install first."
   fi
 
-  # ── 1. Stop the running app ────────────────────────────────────
+  # ── 1. Stop ──────────────────────────────────────────────────────
   step "Stop application"
   pm2 stop mission-control 2>/dev/null && ok "stopped" || skip "not running"
 
-  # ── 2. Backup config and data ──────────────────────────────────
+  # ── 2. Save config + data to temp ────────────────────────────────
   step "Backup config + data"
+  SAVE="/tmp/.mc-upgrade-$$"
+  rm -rf "$SAVE"
+  mkdir -p "$SAVE"
+  cp "$DIR/.env" "$SAVE/.env"
+  [ -d "$DIR/data" ] && cp -r "$DIR/data" "$SAVE/data"
+  [ -f ~/mc-credentials.txt ] && cp ~/mc-credentials.txt "$SAVE/mc-credentials.txt"
+
+  # Also keep a permanent backup inside the install dir
   BACKUP="$DIR/.backup-$(date +%Y%m%d-%H%M%S)"
   mkdir -p "$BACKUP"
   cp "$DIR/.env" "$BACKUP/.env"
   [ -d "$DIR/data" ] && cp -r "$DIR/data" "$BACKUP/data"
-  ok "backed up to $BACKUP"
+  ok "saved to $SAVE"
 
-  # ── 3. Update system packages (non-destructive) ────────────────
-  step "System packages"
-  sudo apt-get update -qq -y < /dev/null
-  sudo apt-get install -y -qq curl wget git build-essential openssl sqlite3 nginx < /dev/null
-  if ! command -v node &>/dev/null || [[ "$(node -v)" != v22* ]]; then
-    curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - < /dev/null
-    sudo apt-get install -y -qq nodejs < /dev/null
-  fi
-  ok "node $(node -v)"
-  sudo npm install -g pm2 --loglevel=error 2>/dev/null || true
+  # ── 3. Nuke everything and fresh clone ───────────────────────────
+  step "Fresh clone (full code replacement)"
+  sudo rm -rf "$DIR"
+  sudo mkdir -p "$DIR"
+  sudo chown "$ME:$ME" "$DIR"
+  git clone --depth 1 "$REPO" "$DIR"
+  ok "cloned latest from $REPO"
 
-  # ── 4. Pull latest code ────────────────────────────────────────
-  step "Update code"
-  cd "$DIR"
-  # Save protected files
-  cp .env /tmp/.mc-env-save
-  [ -d data ] && cp -r data /tmp/.mc-data-save || true
+  # ── 4. Restore config + data ─────────────────────────────────────
+  step "Restore config + data"
+  cp "$SAVE/.env" "$DIR/.env"
+  [ -d "$SAVE/data" ] && cp -r "$SAVE/data" "$DIR/data"
+  [ -f "$SAVE/mc-credentials.txt" ] && cp "$SAVE/mc-credentials.txt" ~/mc-credentials.txt
+  # Restore the backup dir too
+  [ -d "$BACKUP" ] && mv "$BACKUP" "$DIR/.backup-$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true
+  rm -rf "$SAVE"
+  ok "config + data restored"
 
-  # Fetch latest from repo
-  if [ -d .git ]; then
-    git fetch --depth 1 origin main
-    git reset --hard origin/main
-    ok "git updated"
-  else
-    # Not a git repo — re-clone into temp and overlay
-    TMPDIR=$(mktemp -d)
-    git clone --depth 1 "$REPO" "$TMPDIR"
-    # Remove old code files but NOT .env, data, node_modules, .next, .backup*
-    find "$DIR" -maxdepth 1 -type f ! -name '.env' -delete
-    rm -rf "$DIR/components" "$DIR/lib" "$DIR/pages" "$DIR/scripts" "$DIR/skills" "$DIR/nginx"
-    # Copy new code in
-    cp -r "$TMPDIR"/* "$DIR/"
-    cp "$TMPDIR/.gitignore" "$DIR/" 2>/dev/null || true
-    cp "$TMPDIR/.env.example" "$DIR/" 2>/dev/null || true
-    rm -rf "$TMPDIR"
-    ok "code replaced from repo"
-  fi
-
-  # Restore protected files
-  cp /tmp/.mc-env-save "$DIR/.env"
-  [ -d /tmp/.mc-data-save ] && cp -r /tmp/.mc-data-save "$DIR/data" || true
-  rm -f /tmp/.mc-env-save
-  rm -rf /tmp/.mc-data-save
-  ok "config + data preserved"
-
-  # ── 5. Install deps ────────────────────────────────────────────
+  # ── 5. Install deps ──────────────────────────────────────────────
   step "npm install"
   cd "$DIR"
-  sudo chown -R "$ME:$ME" "$DIR"
-  rm -rf node_modules .next
+  mkdir -p "$DIR/data"
   npm install --no-fund --no-audit --loglevel=error 2>&1 | tail -3
   ok "$(ls node_modules | wc -l) packages"
 
-  # ── 6. Migrate database (additive only) ────────────────────────
+  # ── 6. Migrate database ──────────────────────────────────────────
   step "Database migration"
   node scripts/setup-db.js
   ok "schema up to date"
 
-  # ── 7. Rebuild ─────────────────────────────────────────────────
+  # ── 7. Build ─────────────────────────────────────────────────────
   step "Build Next.js"
   npx --yes next build 2>&1 | tail -5
   ok "built"
 
-  # ── 8. Restart ─────────────────────────────────────────────────
+  # ── 8. Restart ───────────────────────────────────────────────────
   step "Restart application"
   pm2 delete mission-control 2>/dev/null || true
   pm2 start server.js --name mission-control --cwd "$DIR" --max-memory-restart 512M --merge-logs
   pm2 save --force 2>/dev/null
   ok "pm2 restarted"
 
-  # ── 9. Health check ────────────────────────────────────────────
+  # ── 9. Health check ──────────────────────────────────────────────
   step "Health check"
   sleep 5
   if curl -sf http://127.0.0.1:$PORT/api/health >/dev/null 2>&1; then
@@ -168,9 +163,9 @@ if [ "$MODE" = "upgrade" ]; then
   echo "══════════════════════════════════════════════════════"
   echo "  🦞 Upgrade complete"
   echo ""
+  echo "  All code replaced with latest from GitHub."
   echo "  Config preserved:   $DIR/.env"
   echo "  Database preserved: $DIR/data/"
-  echo "  Backup at:          $BACKUP"
   echo "  TLS certs:          unchanged"
   echo "  Firewall:           unchanged"
   echo ""
@@ -181,27 +176,14 @@ if [ "$MODE" = "upgrade" ]; then
 fi
 
 # ═══════════════════════════════════════════════════════════════════════
-# CLEAN INSTALL PATH — wipes everything, fresh start
+# CLEAN INSTALL PATH
 # ═══════════════════════════════════════════════════════════════════════
 
-# ── 1. System packages ─────────────────────────────────────────
-step "System packages"
-sudo apt-get update -qq -y < /dev/null
-sudo apt-get install -y -qq curl wget git build-essential openssl sqlite3 ufw nginx < /dev/null
-ok "apt packages"
-
-if ! command -v node &>/dev/null || [[ "$(node -v)" != v22* ]]; then
-  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - < /dev/null
-  sudo apt-get install -y -qq nodejs < /dev/null
-fi
-ok "node $(node -v)"
-
-sudo npm install -g pm2 --loglevel=error 2>/dev/null
-ok "pm2"
-
-# ── 2. Clone ───────────────────────────────────────────────────
-step "Clone repo"
+# ── 1. Stop any existing instance ──────────────────────────────────
 pm2 delete mission-control 2>/dev/null || true
+
+# ── 2. Nuke and fresh clone ────────────────────────────────────────
+step "Clone repo"
 sudo rm -rf $DIR
 sudo mkdir -p $DIR
 sudo chown $ME:$ME $DIR
@@ -209,13 +191,13 @@ git clone --depth 1 $REPO $DIR
 cd $DIR
 ok "cloned"
 
-# ── 3. npm install ─────────────────────────────────────────────
+# ── 3. npm install ─────────────────────────────────────────────────
 step "npm install"
 mkdir -p $DIR/data
 npm install --no-fund --no-audit --loglevel=error 2>&1 | tail -3
 ok "$(ls node_modules | wc -l) packages"
 
-# ── 4. Secrets ─────────────────────────────────────────────────
+# ── 4. Secrets ─────────────────────────────────────────────────────
 step "Generate secrets"
 AP=$(openssl rand -base64 16 | tr -d '=/+' | head -c 20)
 JS=$(openssl rand -base64 32)
@@ -253,17 +235,17 @@ EOF
 chmod 600 ~/mc-credentials.txt
 ok "secrets → ~/mc-credentials.txt"
 
-# ── 5. Database ────────────────────────────────────────────────
+# ── 5. Database ────────────────────────────────────────────────────
 step "Database"
 node scripts/setup-db.js
 ok "sqlite"
 
-# ── 6. Build ───────────────────────────────────────────────────
+# ── 6. Build ───────────────────────────────────────────────────────
 step "Build Next.js"
 npx --yes next build 2>&1 | tail -5
 ok "built"
 
-# ── 7. TLS ─────────────────────────────────────────────────────
+# ── 7. TLS ─────────────────────────────────────────────────────────
 step "TLS cert"
 sudo mkdir -p /etc/nginx/ssl
 if [ ! -f /etc/nginx/ssl/mc-cert.pem ]; then
@@ -274,7 +256,7 @@ if [ ! -f /etc/nginx/ssl/mc-cert.pem ]; then
 fi
 ok "cert"
 
-# ── 8. Nginx ───────────────────────────────────────────────────
+# ── 8. Nginx ───────────────────────────────────────────────────────
 step "Nginx"
 sudo tee /etc/nginx/sites-available/mission-control > /dev/null << 'NGEOF'
 server {
@@ -312,7 +294,7 @@ sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t 2>&1 && sudo systemctl restart nginx
 ok "nginx"
 
-# ── 9. Firewall ────────────────────────────────────────────────
+# ── 9. Firewall ────────────────────────────────────────────────────
 step "Firewall"
 sudo ufw --force reset >/dev/null 2>&1
 sudo ufw default deny incoming >/dev/null 2>&1
@@ -323,7 +305,7 @@ sudo ufw allow from 192.168.0.0/16 to any port 18789 proto tcp >/dev/null 2>&1
 sudo ufw --force enable >/dev/null 2>&1
 ok "ufw"
 
-# ── 10. Swap ───────────────────────────────────────────────────
+# ── 10. Swap ───────────────────────────────────────────────────────
 if [ ! -f /swapfile ]; then
   sudo fallocate -l 2G /swapfile
   sudo chmod 600 /swapfile
@@ -333,7 +315,7 @@ if [ ! -f /swapfile ]; then
 fi
 ok "swap"
 
-# ── 11. Start ──────────────────────────────────────────────────
+# ── 11. Start ──────────────────────────────────────────────────────
 step "Start"
 pm2 delete mission-control 2>/dev/null || true
 pm2 start server.js --name mission-control --cwd $DIR --max-memory-restart 512M --merge-logs
@@ -341,7 +323,7 @@ pm2 save --force 2>/dev/null
 sudo env PATH=$PATH:/usr/bin pm2 startup systemd -u $ME --hp /home/$ME 2>/dev/null || true
 ok "pm2"
 
-# ── 12. Health check ──────────────────────────────────────────
+# ── 12. Health check ──────────────────────────────────────────────
 step "Health check"
 sleep 5
 if curl -sf http://127.0.0.1:$PORT/api/health >/dev/null 2>&1; then
