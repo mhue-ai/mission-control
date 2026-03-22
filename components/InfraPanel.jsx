@@ -23,7 +23,7 @@ function Badge({color,children}){const c={green:{bg:"#0d2818",t:"#22c55e",b:"#14
 function Btn({onClick,children,v="default",sm,disabled}){const s={default:{bg:"#161a24",h:"#1e2230",b:"#1e2430",c:"#d4d8e0"},danger:{bg:"#2a0f0f",h:"#3d1616",b:"#3d1616",c:"#ef4444"},primary:{bg:"#2a1508",h:"#3d1f0f",b:"#4a2812",c:"#e85d24"},success:{bg:"#0d2818",h:"#143d24",b:"#143d24",c:"#22c55e"}}[v];return<button onClick={onClick} disabled={disabled} style={{display:"inline-flex",alignItems:"center",gap:5,fontSize:sm?11:12,fontWeight:500,padding:sm?"4px 10px":"6px 14px",borderRadius:8,border:`1px solid ${s.b}`,background:s.bg,color:s.c,cursor:disabled?"not-allowed":"pointer",opacity:disabled?.5:1}} onMouseEnter={e=>{if(!disabled)e.target.style.background=s.h}} onMouseLeave={e=>{if(!disabled)e.target.style.background=s.bg}}>{children}</button>;}
 function Card({children,style}){return<div style={{background:"#11131a",border:"1px solid #1a1e2c",borderRadius:12,padding:16,...style}}>{children}</div>;}
 const Input=({value,onChange,placeholder,style,...p})=><input value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} style={{background:"#090b0f",border:"1px solid #1a1e2c",borderRadius:8,color:"#d4d8e0",padding:"8px 12px",fontSize:12,outline:"none",width:"100%",boxSizing:"border-box",...style}} {...p}/>;
-const Modal=({children,onClose})=><div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100}}><Card style={{width:520,maxHeight:"85vh",overflow:"auto"}} onClick={e=>e.stopPropagation()}>{children}</Card></div>;
+const Modal=({children,onClose})=><div onMouseDown={e=>{if(e.target===e.currentTarget)onClose();}} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100}}><Card style={{width:520,maxHeight:"85vh",overflow:"auto"}}>{children}</Card></div>;
 
 const accessColor = l => l === "read_write" ? "teal" : l === "read" ? "blue" : "red";
 
@@ -97,12 +97,12 @@ export default function InfraPanel() {
   const runScan = async () => {
     setScanning(true);
     setScanResult(null);
-    setShowScan(false);
     try {
       const result = await apiPost('/api/infra/scan', { subnet: scanSubnet });
       setScanResult(result);
       showToast(`Scan complete: ${result.added} new, ${result.skipped} existing`);
       refresh();
+      setShowScan(false);
     } catch(e) {
       showToast(`Scan failed: ${e.message}`, false);
     }
@@ -262,15 +262,23 @@ export default function InfraPanel() {
     </Modal>}
 
     {/* Scan network modal */}
-    {showScan&&<Modal onClose={()=>setShowScan(false)}>
+    {showScan&&<Modal onClose={()=>{if(!scanning)setShowScan(false);}}>
       <h3 style={{fontSize:14,fontWeight:600,color:"#f0f2f5",margin:"0 0 14px"}}>Network scan</h3>
       <div style={{display:"flex",flexDirection:"column",gap:10}}>
-        <div><div style={{fontSize:11,color:"#5a6070",marginBottom:4}}>Subnet to scan</div><Input value={scanSubnet} onChange={v=>setScanSubnet(v)} placeholder="192.168.1.0/24" className="mono"/></div>
+        <div><div style={{fontSize:11,color:"#5a6070",marginBottom:4}}>Subnet to scan</div><Input value={scanSubnet} onChange={v=>setScanSubnet(v)} placeholder="192.168.1.0/24" className="mono" disabled={scanning}/></div>
         <div style={{fontSize:11,color:"#5a6070"}}>Method: {scanInfo?.nmapAvailable?"nmap (fast, detailed service detection)":"TCP connect scan (install nmap for faster, more detailed results)"}</div>
         <div style={{background:"#0d0f14",borderRadius:8,padding:12,fontSize:11,color:"#8b90a0"}}>
           Scans the specified subnet for common services: SSH, HTTP/HTTPS, databases (PostgreSQL, MySQL, MongoDB, Redis), message queues (RabbitMQ), monitoring (Prometheus), and OpenClaw gateways. Discovered hosts are added to the infrastructure registry. Duplicates are automatically skipped.
         </div>
-        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn onClick={()=>setShowScan(false)}>Cancel</Btn><Btn v="success" onClick={runScan} disabled={!scanSubnet}>Start scan</Btn></div>
+        {scanning&&<div style={{display:"flex",alignItems:"center",gap:8,padding:12,background:"#0c1a2e",borderRadius:8,border:"1px solid #132d4a"}}>
+          <div style={{width:14,height:14,border:"2px solid #3b82f6",borderTopColor:"transparent",borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
+          <span style={{fontSize:12,color:"#3b82f6"}}>Scanning {scanSubnet}... this may take up to 2 minutes</span>
+          <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+        </div>}
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+          <Btn onClick={()=>setShowScan(false)} disabled={scanning}>Cancel</Btn>
+          <Btn v="success" onClick={runScan} disabled={!scanSubnet||scanning}>{scanning?"Scanning...":"Start scan"}</Btn>
+        </div>
       </div>
     </Modal>}
   </div>;

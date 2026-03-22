@@ -48,7 +48,7 @@ function Metric({label,value,sub,color,icon}){return <div style={{background:"#1
 function Section({children,icon,action}){return <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}><div style={{display:"flex",alignItems:"center",gap:8,fontSize:13,fontWeight:500,color:"#8b90a0",textTransform:"uppercase",letterSpacing:".05em"}}>{icon&&<I t={icon} s={14}/>}{children}</div>{action}</div>;}
 const Input=({value,onChange,placeholder,style,...p})=><input value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} style={{background:"#090b0f",border:"1px solid #1a1e2c",borderRadius:8,color:"#d4d8e0",padding:"8px 12px",fontSize:12,outline:"none",width:"100%",boxSizing:"border-box",...style}} {...p}/>;
 const Select=({value,onChange,children,style})=><select value={value} onChange={e=>onChange(e.target.value)} style={{background:"#161a24",border:"1px solid #1e2430",borderRadius:6,color:"#d4d8e0",fontSize:11,padding:"6px 8px",...style}}>{children}</select>;
-const Modal=({children,onClose})=><div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100}}><Card style={{width:520,maxHeight:"85vh",overflow:"auto"}} onClick={e=>e.stopPropagation()}>{children}</Card></div>;
+const Modal=({children,onClose})=><div onMouseDown={e=>{if(e.target===e.currentTarget)onClose();}} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100}}><Card style={{width:520,maxHeight:"85vh",overflow:"auto"}}>{children}</Card></div>;
 const sBadge=s=>{const m={running:"blue",active:"green",completed:"green",done:"green",healthy:"green",connected:"green",paused:"yellow",queued:"purple",idle:"gray",draft:"gray",stopped:"red",error:"red",failed:"red",disconnected:"red",onboarding:"orange",archived:"gray"};return <Badge color={m[s]||"gray"}>{s}</Badge>;};
 const pBadge=p=><Badge color={{critical:"red",high:"orange",normal:"gray",low:"gray"}[p]||"gray"}>{p}</Badge>;
 
@@ -110,7 +110,7 @@ export default function MissionControl(){
   return <div style={{fontFamily:"'DM Sans',sans-serif",background:"#0a0c10",color:"#d4d8e0",minHeight:"100vh",display:"flex"}}>
     <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');@keyframes pulse-ring{0%{transform:scale(1);opacity:.3}100%{transform:scale(2.2);opacity:0}}.mono{font-family:'JetBrains Mono',monospace}::-webkit-scrollbar{width:6px}::-webkit-scrollbar-thumb{background:#1a1e2c;border-radius:3px}`}</style>
     {/* Sidebar */}
-    <nav style={{width:52,background:"#090b0f",borderRight:"1px solid #12151e",display:"flex",flexDirection:"column",alignItems:"center",padding:"12px 0",gap:4,flexShrink:0}}>
+    <nav style={{width:52,background:"#090b0f",borderRight:"1px solid #12151e",display:"flex",flexDirection:"column",alignItems:"center",padding:"12px 0 16px",gap:4,flexShrink:0}}>
       <div style={{fontSize:22,marginBottom:12,cursor:"pointer"}} onClick={()=>setView("overview")}>🦞</div>
       {nav.map(n=><button key={n.id} onClick={()=>setView(n.id)} title={n.label} style={{width:40,height:40,borderRadius:10,border:"none",background:view===n.id?"#1a1e2c":"transparent",color:view===n.id?"#e85d24":"#5a6070",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}><I t={n.icon} s={18}/></button>)}
       <div style={{flex:1}}/>
