@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  # ─── Mission Control Application ─────────────────────────────────────
+  mission-control:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    container_name: mc-app
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    environment:
+      - NODE_ENV=production
+      - MC_PORT=3100
+      - MC_DB_PATH=/data/mission-control.db
+    env_file:
+      - ./app/.env
+    volumes:
+      - mc-data:/data
+      - mc-logs:/app/logs
+    networks:
+      - mc-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3100/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ─── Nginx Reverse Proxy with HTTPS ──────────────────────────────────
+  nginx:
+    image: nginx:alpine
+    container_name: mc-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - certbot-webroot:/var/www/certbot:ro
+    depends_on:
+      - mission-control
+    networks:
+      - mc-network
+
+  # ─── Certbot for Let's Encrypt (optional) ────────────────────────────
+  certbot:
+    image: certbot/certbot
+    container_name: mc-certbot
+    volumes:
+      - ./nginx/ssl:/etc/letsencrypt
+      - certbot-webroot:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+    profiles:
+      - letsencrypt
+
+volumes:
+  mc-data:
+    driver: local
+  mc-logs:
+    driver: local
+  certbot-webroot:
+    driver: local
+
+networks:
+  mc-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16

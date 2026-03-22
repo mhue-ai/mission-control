@@ -1,0 +1,32 @@
+[Unit]
+Description=OpenClaw Mission Control
+Documentation=https://github.com/openclaw/openclaw
+After=network.target nginx.service
+Wants=nginx.service
+
+[Service]
+Type=forking
+User=mcadmin
+Group=mcadmin
+WorkingDirectory=/opt/mission-control/app
+Environment=NODE_ENV=production
+Environment=PM2_HOME=/home/mcadmin/.pm2
+ExecStart=/usr/bin/pm2 start ecosystem.config.js
+ExecReload=/usr/bin/pm2 reload mission-control
+ExecStop=/usr/bin/pm2 stop mission-control
+PIDFile=/home/mcadmin/.pm2/pm2.pid
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mission-control
+
+# Hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/mission-control/app/data /var/log/mission-control /home/mcadmin/.pm2
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
