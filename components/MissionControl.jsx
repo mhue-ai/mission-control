@@ -101,7 +101,7 @@ export default function MissionControl(){
   const nav=[
     {id:"overview",label:"Overview",icon:"chart"},{id:"kanban",label:"Kanban",icon:"kanban"},
     {id:"agents",label:"Agents",icon:"agent"},{id:"workplans",label:"Workplans",icon:"plan"},
-    {id:"infra",label:"Infrastructure",icon:"server"},{id:"gateways",label:"Gateways",icon:"link"},
+    {id:"infra",label:"Infrastructure",icon:"server"},{id:"nodes",label:"OpenClaw Nodes",icon:"link"},
     {id:"watchdog",label:"Watchdog",icon:"shield"},{id:"events",label:"Events",icon:"zap"},
   ];
 
@@ -114,14 +114,12 @@ export default function MissionControl(){
       <div style={{fontSize:22,marginBottom:12,cursor:"pointer"}} onClick={()=>setView("overview")}>🦞</div>
       {nav.map(n=><button key={n.id} onClick={()=>setView(n.id)} title={n.label} style={{width:40,height:40,borderRadius:10,border:"none",background:view===n.id?"#1a1e2c":"transparent",color:view===n.id?"#e85d24":"#5a6070",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}><I t={n.icon} s={18}/></button>)}
       <div style={{flex:1}}/>
-      {/* Settings gear — bottom left */}
-      <button onClick={()=>setView("settings")} title="Settings" style={{width:40,height:40,borderRadius:10,border:"none",background:view==="settings"?"#1a1e2c":"transparent",color:view==="settings"?"#e85d24":"#5a6070",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",marginBottom:4}}><I t="gear" s={18}/></button>
-      {/* User indicator */}
-      {currentUser&&<div title={`${currentUser.username} (${currentUser.role})`} style={{width:30,height:30,borderRadius:"50%",background:"#1a1e2c",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:600,color:"#e85d24",marginBottom:4}}>{(currentUser.displayName||currentUser.username||'?')[0].toUpperCase()}</div>}
+      <button onClick={()=>setView("settings")} title="Settings" style={{width:40,height:40,borderRadius:10,border:"none",background:view==="settings"?"#1a1e2c":"transparent",color:view==="settings"?"#e85d24":"#5a6070",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}><I t="gear" s={18}/></button>
     </nav>
     <main style={{flex:1,overflow:"auto",position:"relative"}}>
       {/* Refresh button — top right */}
-      <div style={{position:"sticky",top:0,zIndex:10,display:"flex",justifyContent:"flex-end",padding:"12px 20px 0"}}>
+      <div style={{position:"sticky",top:0,zIndex:10,display:"flex",justifyContent:"flex-end",alignItems:"center",gap:12,padding:"12px 20px 0"}}>
+        <a href="https://mhue.ai" target="_blank" rel="noopener noreferrer" style={{fontSize:12,fontWeight:500,color:"#5a6070",textDecoration:"none",letterSpacing:".02em",transition:"color .15s"}} onMouseEnter={e=>e.target.style.color="#e85d24"} onMouseLeave={e=>e.target.style.color="#5a6070"}>Mhue.AI</a>
         <Btn sm onClick={refresh} title="Refresh data"><I t="refresh" s={14}/></Btn>
       </div>
       <div style={{padding:"0 20px 20px"}}>
@@ -130,7 +128,7 @@ export default function MissionControl(){
         {view==="agents"&&<Agents agents={agents} gateways={gateways} agentAction={agentAction} deleteAgent={deleteAgent} refresh={refresh} canWrite={canWrite} isAdmin={isAdmin}/>}
         {view==="workplans"&&<Workplans workplans={workplans} refresh={refresh} canWrite={canWrite}/>}
         {view==="infra"&&<InfraPanel/>}
-        {view==="gateways"&&<Gateways gateways={gateways} refresh={refresh} canWrite={canWrite}/>}
+        {view==="nodes"&&<Gateways gateways={gateways} refresh={refresh} canWrite={canWrite}/>}
         {view==="watchdog"&&<Watchdog agents={agents} health={health} agentAction={agentAction} canWrite={canWrite}/>}
         {view==="events"&&<Events events={events}/>}
         {view==="settings"&&<Settings currentUser={currentUser} isAdmin={isAdmin}/>}
@@ -294,12 +292,19 @@ function Agents({agents,gateways,agentAction,deleteAgent,refresh}){
 }
 
 // ─── Workplans ─────────────────────────────────────────────────────────
-function Workplans({workplans,refresh}){
+function Workplans({workplans,refresh,canWrite}){
   const [sel,setSel]=useState(null);
+  const [showCreate,setShowCreate]=useState(false);
+  const [nw,setNw]=useState({name:'',description:''});
   const wp=sel?workplans.find(w=>w.id===sel):null;
   const act=async(id,status)=>{await apiPatch(`/api/workplans/${id}`,{status});refresh();};
+  const create=async()=>{if(!nw.name)return;await apiPost('/api/workplans',{name:nw.name,description:nw.description,status:'draft'});setNw({name:'',description:''});setShowCreate(false);refresh();};
+  const del=async(id)=>{await apiDelete(`/api/workplans/${id}`);setSel(null);refresh();};
   return <div>
-    <h1 style={{fontSize:18,fontWeight:600,color:"#f0f2f5",margin:"0 0 16px"}}>Workplans ({workplans.length})</h1>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
+      <h1 style={{fontSize:18,fontWeight:600,color:"#f0f2f5",margin:0}}>Workplans ({workplans.length})</h1>
+      {canWrite&&<Btn v="primary" onClick={()=>setShowCreate(true)}><I t="plus" s={12}/> Create workplan</Btn>}
+    </div>
     <div style={{display:"grid",gridTemplateColumns:sel?"1fr 360px":"1fr",gap:14}}>
       <Card style={{padding:0,overflow:"hidden"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
@@ -311,38 +316,49 @@ function Workplans({workplans,refresh}){
             <td style={{padding:"8px 10px",color:"#5a6070"}}>{new Date(w.created_at).toLocaleDateString()}</td>
             <td style={{padding:"8px 10px"}} onClick={e=>e.stopPropagation()}>
               <div style={{display:"flex",gap:3}}>
-                {w.status==='draft'&&<Btn sm v="success" onClick={()=>act(w.id,'active')}>Activate</Btn>}
-                {w.status==='active'&&<Btn sm onClick={()=>act(w.id,'paused')}><I t="pause" s={10}/></Btn>}
-                {w.status==='paused'&&<Btn sm v="success" onClick={()=>act(w.id,'active')}><I t="play" s={10}/></Btn>}
-                {['active','paused'].includes(w.status)&&<Btn sm v="success" onClick={()=>act(w.id,'completed')}>Done</Btn>}
-                {w.status==='completed'&&<Btn sm onClick={()=>act(w.id,'archived')}>Archive</Btn>}
+                {w.status==='draft'&&canWrite&&<Btn sm v="success" onClick={()=>act(w.id,'active')}>Activate</Btn>}
+                {w.status==='active'&&canWrite&&<Btn sm onClick={()=>act(w.id,'paused')}><I t="pause" s={10}/></Btn>}
+                {w.status==='paused'&&canWrite&&<Btn sm v="success" onClick={()=>act(w.id,'active')}><I t="play" s={10}/></Btn>}
+                {['active','paused'].includes(w.status)&&canWrite&&<Btn sm v="success" onClick={()=>act(w.id,'completed')}>Done</Btn>}
+                {w.status==='completed'&&canWrite&&<Btn sm onClick={()=>act(w.id,'archived')}>Archive</Btn>}
               </div>
             </td>
           </tr>)}</tbody>
         </table>
-        {workplans.length===0&&<div style={{padding:30,textAlign:"center",color:"#3a3e50",fontSize:12}}>No workplans.</div>}
+        {workplans.length===0&&<div style={{padding:30,textAlign:"center",color:"#3a3e50",fontSize:12}}>No workplans. Create one to start organizing agent tasks.</div>}
       </Card>
       {wp&&<Card>
         <div style={{display:"flex",justifyContent:"space-between",marginBottom:12}}><div style={{fontSize:14,fontWeight:600,color:"#f0f2f5"}}>{wp.name}</div><button onClick={()=>setSel(null)} style={{background:"none",border:"none",color:"#5a6070",cursor:"pointer",fontSize:16}}>×</button></div>
         <div style={{fontSize:12,color:"#8b90a0",marginBottom:8}}>{wp.description||'—'}</div>
         {sBadge(wp.status)}
         {wp.phases&&wp.phases.map(ph=><div key={ph.id} style={{marginTop:12}}><div style={{fontSize:12,fontWeight:500,color:"#8b90a0",marginBottom:6}}>{ph.name}</div>{ph.tasks&&ph.tasks.map(t=><div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"4px 0",borderBottom:"1px solid #12141b",fontSize:11}}><Dot status={t.status} size={6}/><span style={{flex:1,color:"#d4d8e0"}}>{t.name}</span>{sBadge(t.status)}</div>)}</div>)}
+        {canWrite&&<div style={{display:"flex",gap:6,marginTop:14}}><Btn sm v="danger" onClick={()=>del(wp.id)}>Delete workplan</Btn></div>}
       </Card>}
     </div>
+    {showCreate&&<Modal onClose={()=>setShowCreate(false)}>
+      <h3 style={{fontSize:14,fontWeight:600,color:"#f0f2f5",margin:"0 0 14px"}}>Create workplan</h3>
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        <div><div style={{fontSize:11,color:"#5a6070",marginBottom:4}}>Name</div><Input value={nw.name} onChange={v=>setNw({...nw,name:v})} placeholder="e.g. Q2 Customer Onboarding" autoFocus/></div>
+        <div><div style={{fontSize:11,color:"#5a6070",marginBottom:4}}>Description</div><Input value={nw.description} onChange={v=>setNw({...nw,description:v})} placeholder="What does this workplan accomplish?"/></div>
+        <div style={{background:"#0d0f14",borderRadius:8,padding:12,fontSize:11,color:"#8b90a0"}}>Workplan starts as <Badge color="gray">draft</Badge>. Add phases and tasks, then activate to begin execution.</div>
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn onClick={()=>setShowCreate(false)}>Cancel</Btn><Btn v="primary" onClick={create} disabled={!nw.name}>Create</Btn></div>
+      </div>
+    </Modal>}
   </div>;
 }
 
 // ─── Gateways ──────────────────────────────────────────────────────────
-function Gateways({gateways,refresh}){
+function Gateways({gateways,refresh,canWrite}){
   const [show,setShow]=useState(false);
   const [ng,setNg]=useState({label:'',host:'',port:'18789',token:''});
   const add=async()=>{if(!ng.host)return;await apiPost('/api/managed-gateways',{...ng,port:parseInt(ng.port)||18789});setNg({label:'',host:'',port:'18789',token:''});setShow(false);refresh();};
   const del=async id=>{await apiDelete(`/api/managed-gateways/${id}`);refresh();};
   return <div>
-    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
-      <h1 style={{fontSize:18,fontWeight:600,color:"#f0f2f5",margin:0}}>Gateways ({gateways.length})</h1>
-      <Btn v="primary" onClick={()=>setShow(true)}><I t="plus" s={12}/> Add gateway</Btn>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
+      <h1 style={{fontSize:18,fontWeight:600,color:"#f0f2f5",margin:0}}>OpenClaw nodes ({gateways.length})</h1>
+      {canWrite&&<Btn v="primary" onClick={()=>setShow(true)}><I t="plus" s={12}/> Add node</Btn>}
     </div>
+    <p style={{fontSize:12,color:"#5a6070",marginBottom:16}}>OpenClaw runtime instances that host your AI agents. Each node runs a gateway daemon on port 18789.</p>
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:10}}>
       {gateways.map(g=><Card key={g.id} style={{padding:14}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}><div style={{display:"flex",alignItems:"center",gap:8}}><Dot status={g.status} size={10}/><span style={{fontWeight:500,fontSize:13}}>{g.label}</span></div>{sBadge(g.status)}</div>
@@ -468,7 +484,7 @@ function Settings({currentUser, isAdmin}){
 
     {/* Tabs */}
     <div style={{display:"flex",gap:6,marginBottom:14}}>
-      {[["users","Users & access"],["roles","Role permissions"],["system","System"]].map(([id,label])=>
+      {[["users","Users & access"],["roles","Role permissions"],["models","LLM models"],["system","System"]].map(([id,label])=>
         <button key={id} onClick={()=>setTab(id)} style={{fontSize:11,padding:"5px 14px",borderRadius:6,border:"1px solid "+(tab===id?"#e85d24":"#1e2430"),background:tab===id?"#2a1508":"transparent",color:tab===id?"#e85d24":"#5a6070",cursor:"pointer"}}>{label}</button>
       )}
     </div>
@@ -568,6 +584,27 @@ function Settings({currentUser, isAdmin}){
           </tr>)}
         </tbody>
       </table>
+    </Card>}
+
+    {/* Models tab */}
+    {tab==="models"&&<Card>
+      <div style={{fontSize:13,fontWeight:500,color:"#f0f2f5",marginBottom:12}}>LLM model configuration</div>
+      <p style={{fontSize:12,color:"#5a6070",marginBottom:14}}>Configure which models the dashboard and agents can use. Models are set per-agent via the OpenClaw node configuration.</p>
+      {[
+        {provider:"Anthropic",models:["claude-opus-4-6","claude-sonnet-4-6","claude-haiku-4-5"],docs:"https://docs.anthropic.com"},
+        {provider:"OpenAI",models:["gpt-5.4","gpt-4.1","o4-mini"],docs:"https://platform.openai.com/docs"},
+        {provider:"Google",models:["gemini-3.1-pro","gemini-3.1-flash"],docs:"https://ai.google.dev"},
+        {provider:"Local (LM Studio / Ollama)",models:["Custom endpoint"],docs:null},
+      ].map(p=><div key={p.provider} style={{marginBottom:12,padding:12,background:"#0d0f14",borderRadius:8}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+          <span style={{fontSize:12,fontWeight:500,color:"#d4d8e0"}}>{p.provider}</span>
+          {p.docs&&<a href={p.docs} target="_blank" rel="noopener" style={{fontSize:10,color:"#5a6070",textDecoration:"none"}}>Docs →</a>}
+        </div>
+        <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+          {p.models.map(m=><Badge key={m} color="purple">{m}</Badge>)}
+        </div>
+      </div>)}
+      <div style={{fontSize:11,color:"#5a6070",marginTop:8}}>To change an agent's model, edit the OpenClaw node config or update the agent's model field in the Agents panel.</div>
     </Card>}
 
     {/* System tab */}

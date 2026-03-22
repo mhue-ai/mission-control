@@ -38,6 +38,8 @@ export default function InfraPanel() {
   const [scanning, setScanning] = useState(false);
   const [scanResult, setScanResult] = useState(null);
   const [scanInfo, setScanInfo] = useState(null);
+  const [showScan, setShowScan] = useState(false);
+  const [scanSubnet, setScanSubnet] = useState('');
   const [toast, setToast] = useState(null);
   const [newComp, setNewComp] = useState({ type:"server",name:"",host:"",port:"",description:"",environment:"production" });
 
@@ -91,11 +93,13 @@ export default function InfraPanel() {
   };
 
   // ─── Network scan ──────────────────────────────────────────
+  const openScan = () => { setScanSubnet(scanInfo?.subnet || '192.168.1.0/24'); setShowScan(true); };
   const runScan = async () => {
     setScanning(true);
     setScanResult(null);
+    setShowScan(false);
     try {
-      const result = await apiPost('/api/infra/scan', { subnet: scanInfo?.subnet });
+      const result = await apiPost('/api/infra/scan', { subnet: scanSubnet });
       setScanResult(result);
       showToast(`Scan complete: ${result.added} new, ${result.skipped} existing`);
       refresh();
@@ -127,7 +131,7 @@ export default function InfraPanel() {
         <p style={{fontSize:12,color:"#5a6070",marginTop:2}}>Your operating environment. Scan to discover, or add manually.</p>
       </div>
       <div style={{display:"flex",gap:6}}>
-        <Btn v="success" onClick={runScan} disabled={scanning}>
+        <Btn v="success" onClick={openScan} disabled={scanning}>
           {scanning ? "Scanning..." : "🔍 Scan network"}
         </Btn>
         <Btn v="primary" onClick={()=>setShowAdd(true)}>+ Add component</Btn>
@@ -254,6 +258,19 @@ export default function InfraPanel() {
       <div style={{display:"flex",gap:8,marginTop:14,justifyContent:"flex-end"}}>
         <Btn onClick={()=>setShowAdd(false)}>Cancel</Btn>
         <Btn v="primary" onClick={addComponent} disabled={!newComp.name}>Add</Btn>
+      </div>
+    </Modal>}
+
+    {/* Scan network modal */}
+    {showScan&&<Modal onClose={()=>setShowScan(false)}>
+      <h3 style={{fontSize:14,fontWeight:600,color:"#f0f2f5",margin:"0 0 14px"}}>Network scan</h3>
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        <div><div style={{fontSize:11,color:"#5a6070",marginBottom:4}}>Subnet to scan</div><Input value={scanSubnet} onChange={v=>setScanSubnet(v)} placeholder="192.168.1.0/24" className="mono"/></div>
+        <div style={{fontSize:11,color:"#5a6070"}}>Method: {scanInfo?.nmapAvailable?"nmap (fast, detailed service detection)":"TCP connect scan (install nmap for faster, more detailed results)"}</div>
+        <div style={{background:"#0d0f14",borderRadius:8,padding:12,fontSize:11,color:"#8b90a0"}}>
+          Scans the specified subnet for common services: SSH, HTTP/HTTPS, databases (PostgreSQL, MySQL, MongoDB, Redis), message queues (RabbitMQ), monitoring (Prometheus), and OpenClaw gateways. Discovered hosts are added to the infrastructure registry. Duplicates are automatically skipped.
+        </div>
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn onClick={()=>setShowScan(false)}>Cancel</Btn><Btn v="success" onClick={runScan} disabled={!scanSubnet}>Start scan</Btn></div>
       </div>
     </Modal>}
   </div>;

@@ -339,8 +339,9 @@ app.prepare().then(() => {
       if (pathname === '/api/workplans' && req.method === 'POST') {
         return readBody(req, (body) => {
           try {
+            if (!body.id) body.id = 'wp-' + require('crypto').randomUUID().slice(0, 8);
             const wp = workplanStore.createWorkplan(body);
-            json(res, 201, wp);
+            json(res, 201, wp || { id: body.id, ...body });
           } catch (e) { json(res, 400, { error: e.message }); }
         });
       }

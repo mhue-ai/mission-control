@@ -242,9 +242,13 @@ EOF
 
 cat > ~/mc-credentials.txt << EOF
 Mission Control — $(date)
-Dashboard:      https://$IP
-Admin password: $AP
-Agent token:    $AT
+Dashboard:        https://$IP
+Admin username:   admin
+Admin password:   $AP
+Agent token:      $AT
+
+⚠ Change the admin password after first login:
+  Settings → Users → Edit admin user
 EOF
 chmod 600 ~/mc-credentials.txt
 ok "secrets → ~/mc-credentials.txt"
@@ -352,7 +356,13 @@ echo "════════════════════════�
 echo "  🦞 Clean install complete"
 echo ""
 echo "  Dashboard:  https://$IP"
+echo ""
+echo "  Username:   admin"
 echo "  Password:   $AP"
+echo ""
+echo "  ⚠ Change this password after first login:"
+echo "    Settings → Users → Edit admin user"
+echo ""
 echo "  Creds file: ~/mc-credentials.txt"
 echo ""
 echo "  Next: edit $DIR/.env → set MC_GATEWAYS"
