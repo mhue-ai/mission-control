@@ -41,12 +41,13 @@ if [ -z "$MODE" ]; then
   echo ""
 
   if $EXISTING; then
-    echo -e "  ${Y}Existing installation detected at $DIR${N}"
+    printf "  \033[1;33mExisting installation detected at $DIR\033[0m\n"
     echo ""
-    echo "  ${B}1)${N} Clean install   — wipes everything, fresh start"
-    echo "  ${B}2)${N} Upgrade         — updates code only, keeps config + data"
+    printf "  \033[1m1)\033[0m Clean install   — wipes everything, fresh start\n"
+    printf "  \033[1m2)\033[0m Upgrade         — updates code only, keeps config + data\n"
     echo ""
-    read -rp "  Select [1/2]: " choice
+    printf "  Select [1/2]: "
+    read -r choice < /dev/tty
     case "$choice" in
       1) MODE="clean" ;;
       2) MODE="upgrade" ;;
