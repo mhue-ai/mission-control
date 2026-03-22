@@ -16,10 +16,25 @@
 
 const http = require('http');
 const { parse } = require('url');
+const fs = require('fs');
 const next = require('next');
 const { WebSocketServer, WebSocket } = require('ws');
 const Database = require('better-sqlite3');
 const path = require('path');
+
+// Load .env file (no dotenv dependency needed)
+const envPath = path.join(__dirname, '.env');
+if (fs.existsSync(envPath)) {
+  fs.readFileSync(envPath, 'utf8').split('\n').forEach(line => {
+    line = line.trim();
+    if (!line || line.startsWith('#')) return;
+    const eq = line.indexOf('=');
+    if (eq < 0) return;
+    const key = line.slice(0, eq).trim();
+    const val = line.slice(eq + 1).trim();
+    if (!process.env[key]) process.env[key] = val;
+  });
+}
 
 const { GatewayConnector } = require('./lib/gateway-connector');
 const { ExecutionEngine } = require('./lib/execution-engine');
