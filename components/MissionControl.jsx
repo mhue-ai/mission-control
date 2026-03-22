@@ -87,6 +87,17 @@ export default function MissionControl(){
     cards:kanban?.columns?.reduce((s,c)=>s+c.cards.length,0)||0,
   }),[agents,gateways,workplans,kanban]);
 
+  const [currentUser, setCurrentUser] = useState(null);
+
+  // Load current user on mount
+  useEffect(() => {
+    try { const u = sessionStorage.getItem('mc_user'); if (u) setCurrentUser(JSON.parse(u)); } catch {}
+    apiGet('/api/auth/me').then(u => { if (u) setCurrentUser(u); }).catch(() => {});
+  }, []);
+
+  const isAdmin = currentUser?.role === 'admin';
+  const canWrite = currentUser?.role === 'admin' || currentUser?.role === 'editor';
+
   const nav=[
     {id:"overview",label:"Overview",icon:"chart"},{id:"kanban",label:"Kanban",icon:"kanban"},
     {id:"agents",label:"Agents",icon:"agent"},{id:"workplans",label:"Workplans",icon:"plan"},
@@ -98,20 +109,32 @@ export default function MissionControl(){
 
   return <div style={{fontFamily:"'DM Sans',sans-serif",background:"#0a0c10",color:"#d4d8e0",minHeight:"100vh",display:"flex"}}>
     <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');@keyframes pulse-ring{0%{transform:scale(1);opacity:.3}100%{transform:scale(2.2);opacity:0}}.mono{font-family:'JetBrains Mono',monospace}::-webkit-scrollbar{width:6px}::-webkit-scrollbar-thumb{background:#1a1e2c;border-radius:3px}`}</style>
+    {/* Sidebar */}
     <nav style={{width:52,background:"#090b0f",borderRight:"1px solid #12151e",display:"flex",flexDirection:"column",alignItems:"center",padding:"12px 0",gap:4,flexShrink:0}}>
       <div style={{fontSize:22,marginBottom:12,cursor:"pointer"}} onClick={()=>setView("overview")}>🦞</div>
       {nav.map(n=><button key={n.id} onClick={()=>setView(n.id)} title={n.label} style={{width:40,height:40,borderRadius:10,border:"none",background:view===n.id?"#1a1e2c":"transparent",color:view===n.id?"#e85d24":"#5a6070",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}><I t={n.icon} s={18}/></button>)}
-      <div style={{flex:1}}/><Btn sm onClick={refresh} title="Refresh"><I t="refresh" s={14}/></Btn>
+      <div style={{flex:1}}/>
+      {/* Settings gear — bottom left */}
+      <button onClick={()=>setView("settings")} title="Settings" style={{width:40,height:40,borderRadius:10,border:"none",background:view==="settings"?"#1a1e2c":"transparent",color:view==="settings"?"#e85d24":"#5a6070",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",marginBottom:4}}><I t="gear" s={18}/></button>
+      {/* User indicator */}
+      {currentUser&&<div title={`${currentUser.username} (${currentUser.role})`} style={{width:30,height:30,borderRadius:"50%",background:"#1a1e2c",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:600,color:"#e85d24",marginBottom:4}}>{(currentUser.displayName||currentUser.username||'?')[0].toUpperCase()}</div>}
     </nav>
-    <main style={{flex:1,overflow:"auto",padding:20}}>
-      {view==="overview"&&<Overview stats={stats} agents={agents} health={health} workplans={workplans} setView={setView} agentAction={agentAction}/>}
-      {view==="kanban"&&<Kanban kanban={kanban} agents={agents} refresh={refresh}/>}
-      {view==="agents"&&<Agents agents={agents} gateways={gateways} agentAction={agentAction} deleteAgent={deleteAgent} refresh={refresh}/>}
-      {view==="workplans"&&<Workplans workplans={workplans} refresh={refresh}/>}
-      {view==="infra"&&<InfraPanel/>}
-      {view==="gateways"&&<Gateways gateways={gateways} refresh={refresh}/>}
-      {view==="watchdog"&&<Watchdog agents={agents} health={health} agentAction={agentAction}/>}
-      {view==="events"&&<Events events={events}/>}
+    <main style={{flex:1,overflow:"auto",position:"relative"}}>
+      {/* Refresh button — top right */}
+      <div style={{position:"sticky",top:0,zIndex:10,display:"flex",justifyContent:"flex-end",padding:"12px 20px 0"}}>
+        <Btn sm onClick={refresh} title="Refresh data"><I t="refresh" s={14}/></Btn>
+      </div>
+      <div style={{padding:"0 20px 20px"}}>
+        {view==="overview"&&<Overview stats={stats} agents={agents} health={health} workplans={workplans} setView={setView} agentAction={agentAction} canWrite={canWrite}/>}
+        {view==="kanban"&&<Kanban kanban={kanban} agents={agents} refresh={refresh} canWrite={canWrite}/>}
+        {view==="agents"&&<Agents agents={agents} gateways={gateways} agentAction={agentAction} deleteAgent={deleteAgent} refresh={refresh} canWrite={canWrite} isAdmin={isAdmin}/>}
+        {view==="workplans"&&<Workplans workplans={workplans} refresh={refresh} canWrite={canWrite}/>}
+        {view==="infra"&&<InfraPanel/>}
+        {view==="gateways"&&<Gateways gateways={gateways} refresh={refresh} canWrite={canWrite}/>}
+        {view==="watchdog"&&<Watchdog agents={agents} health={health} agentAction={agentAction} canWrite={canWrite}/>}
+        {view==="events"&&<Events events={events}/>}
+        {view==="settings"&&<Settings currentUser={currentUser} isAdmin={isAdmin}/>}
+      </div>
     </main>
   </div>;
 }
@@ -243,7 +266,11 @@ function Agents({agents,gateways,agentAction,deleteAgent,refresh}){
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}><div><div style={{fontSize:14,fontWeight:600,color:"#f0f2f5"}}>{a.name}</div><div style={{fontSize:11,color:"#5a6070"}}>{a.id}</div></div><button onClick={()=>setSel(null)} style={{background:"none",border:"none",color:"#5a6070",cursor:"pointer",fontSize:16}}>×</button></div>
         {[["Status",sBadge(a.status)],["Role",a.role],["Model",a.model||'—'],["Gateway",a.gateway_label||'—'],["Channel",a.channel||'—'],["Max concurrent",a.max_concurrent],["Tokens",fmtTok(a.tokens_used||0)],["Cost","$"+(a.cost_usd||0).toFixed(2)],["Sessions",a.sessions_active||0],["Restarts",a.restarts||0],["Last heartbeat",fmtTime(a.last_heartbeat)],["Created",new Date(a.created_at).toLocaleDateString()]].map(([k,v])=><div key={k} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #12141b",fontSize:12}}><span style={{color:"#5a6070"}}>{k}</span><span style={{color:"#d4d8e0"}}>{v}</span></div>)}
         {a.notes&&<div style={{marginTop:10,fontSize:11,color:"#5a6070",lineHeight:1.4}}>{a.notes}</div>}
-        <div style={{display:"flex",gap:6,marginTop:14}}><Btn sm v="danger" onClick={()=>setConfirmDel(a.id)}>Remove agent</Btn></div>
+        <div style={{display:"flex",gap:6,marginTop:14}}>
+          {canWrite&&a.gateway_id&&<Btn sm v="primary" onClick={async()=>{try{const r=await apiPost(`/api/agents/${a.id}/pull-config`);if(r.ok)alert('Config pulled and saved.');}catch(e){alert('Failed: '+e.message);}}}>Pull config</Btn>}
+          {canWrite&&<Btn sm onClick={async()=>{try{const r=await apiGet(`/api/agents/${a.id}/config`);alert(JSON.stringify(r.config,null,2).slice(0,500));}catch(e){alert(e.message);}}}>View config</Btn>}
+          {canWrite&&<Btn sm v="danger" onClick={()=>setConfirmDel(a.id)}>Remove agent</Btn>}
+        </div>
       </Card>}
     </div>
     {showOb&&<Modal onClose={()=>setShowOb(false)}>
@@ -362,5 +389,198 @@ function Events({events}){
         <span style={{color:"#8b90a0",flex:1}}>{ev.message}</span>
       </div>)}
     </Card>
+  </div>;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// SETTINGS — User management, RBAC, system config
+// ═══════════════════════════════════════════════════════════════════════
+function Settings({currentUser, isAdmin}){
+  const [tab, setTab] = useState("users");
+  const [users, setUsers] = useState([]);
+  const [showAdd, setShowAdd] = useState(false);
+  const [newUser, setNewUser] = useState({username:'',password:'',displayName:'',role:'viewer'});
+  const [editUser, setEditUser] = useState(null);
+  const [toast, setToast] = useState(null);
+
+  const showToast = (msg, ok=true) => { setToast({msg,ok}); setTimeout(()=>setToast(null), 3000); };
+
+  const loadUsers = async () => {
+    try { const u = await apiGet('/api/users'); setUsers(u || []); }
+    catch { setUsers([]); }
+  };
+  useEffect(() => { loadUsers(); }, []);
+
+  const createUser = async () => {
+    if (!newUser.username || !newUser.password) return;
+    try {
+      await apiPost('/api/users', newUser);
+      setNewUser({username:'',password:'',displayName:'',role:'viewer'});
+      setShowAdd(false);
+      showToast('User created');
+      loadUsers();
+    } catch(e) { showToast(e.message, false); }
+  };
+
+  const updateUser = async (id, updates) => {
+    try {
+      await apiPatch(`/api/users/${id}`, updates);
+      showToast('User updated');
+      loadUsers();
+      setEditUser(null);
+    } catch(e) { showToast(e.message, false); }
+  };
+
+  const deleteUser = async (id) => {
+    try {
+      await apiDelete(`/api/users/${id}`);
+      showToast('User removed');
+      loadUsers();
+    } catch(e) { showToast(e.message, false); }
+  };
+
+  const logout = () => {
+    apiPost('/api/auth/logout').catch(()=>{});
+    sessionStorage.clear();
+    window.location.href = '/login';
+  };
+
+  const roleBadge = r => <Badge color={r==='admin'?'orange':r==='editor'?'blue':'gray'}>{r}</Badge>;
+
+  return <div>
+    {toast&&<div style={{position:"fixed",top:20,right:20,zIndex:200,background:toast.ok?"#0d2818":"#2a0f0f",color:toast.ok?"#22c55e":"#ef4444",border:`1px solid ${toast.ok?"#143d24":"#3d1616"}`,borderRadius:8,padding:"8px 16px",fontSize:12,fontWeight:500}}>{toast.msg}</div>}
+
+    <h1 style={{fontSize:18,fontWeight:600,color:"#f0f2f5",margin:"0 0 16px"}}>Settings</h1>
+
+    {/* Current user info */}
+    <Card style={{padding:14,marginBottom:16}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:36,height:36,borderRadius:"50%",background:"#1a1e2c",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:600,color:"#e85d24"}}>{(currentUser?.displayName||currentUser?.username||'?')[0].toUpperCase()}</div>
+          <div>
+            <div style={{fontSize:13,fontWeight:500,color:"#f0f2f5"}}>{currentUser?.displayName||currentUser?.username||'Unknown'}</div>
+            <div style={{fontSize:11,color:"#5a6070"}}>{currentUser?.username} · {roleBadge(currentUser?.role||'viewer')}</div>
+          </div>
+        </div>
+        <Btn sm v="danger" onClick={logout}>Sign out</Btn>
+      </div>
+    </Card>
+
+    {/* Tabs */}
+    <div style={{display:"flex",gap:6,marginBottom:14}}>
+      {[["users","Users & access"],["roles","Role permissions"],["system","System"]].map(([id,label])=>
+        <button key={id} onClick={()=>setTab(id)} style={{fontSize:11,padding:"5px 14px",borderRadius:6,border:"1px solid "+(tab===id?"#e85d24":"#1e2430"),background:tab===id?"#2a1508":"transparent",color:tab===id?"#e85d24":"#5a6070",cursor:"pointer"}}>{label}</button>
+      )}
+    </div>
+
+    {/* Users tab */}
+    {tab==="users"&&<div>
+      {isAdmin&&<div style={{display:"flex",justifyContent:"flex-end",marginBottom:10}}>
+        <Btn v="primary" onClick={()=>setShowAdd(true)}><I t="plus" s={12}/> Add user</Btn>
+      </div>}
+
+      <Card style={{padding:0,overflow:"hidden"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+          <thead><tr style={{borderBottom:"1px solid #1a1e2c"}}>
+            {["Username","Display name","Role","Status","Last login",isAdmin?"Actions":""].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",fontSize:10,color:"#5a6070",fontWeight:500,textTransform:"uppercase"}}>{h}</th>)}
+          </tr></thead>
+          <tbody>{users.map(u=><tr key={u.id} style={{borderBottom:"1px solid #12141b"}}>
+            <td style={{padding:"8px 10px",fontWeight:500,color:"#f0f2f5"}}>{u.username}</td>
+            <td style={{padding:"8px 10px",color:"#8b90a0"}}>{u.display_name||'—'}</td>
+            <td style={{padding:"8px 10px"}}>{roleBadge(u.role)}</td>
+            <td style={{padding:"8px 10px"}}><Badge color={u.enabled?"green":"red"}>{u.enabled?"active":"disabled"}</Badge></td>
+            <td style={{padding:"8px 10px",color:"#5a6070",fontSize:11}}>{u.last_login?new Date(u.last_login).toLocaleString():'never'}</td>
+            <td style={{padding:"8px 10px"}}>
+              {isAdmin&&u.id!==currentUser?.userId&&<div style={{display:"flex",gap:3}}>
+                <Btn sm onClick={()=>setEditUser(u)}>Edit</Btn>
+                <Btn sm v="danger" onClick={()=>deleteUser(u.id)}>Remove</Btn>
+              </div>}
+            </td>
+          </tr>)}</tbody>
+        </table>
+        {!isAdmin&&<div style={{padding:20,textAlign:"center",color:"#5a6070",fontSize:12}}>Only admins can manage users.</div>}
+      </Card>
+
+      {/* Add user modal */}
+      {showAdd&&<Modal onClose={()=>setShowAdd(false)}>
+        <h3 style={{fontSize:14,fontWeight:600,color:"#f0f2f5",margin:"0 0 14px"}}>Add user</h3>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <div><div style={{fontSize:11,color:"#5a6070",marginBottom:4}}>Username</div><Input value={newUser.username} onChange={v=>setNewUser({...newUser,username:v})} placeholder="e.g. jsmith" autoFocus/></div>
+          <div><div style={{fontSize:11,color:"#5a6070",marginBottom:4}}>Display name</div><Input value={newUser.displayName} onChange={v=>setNewUser({...newUser,displayName:v})} placeholder="e.g. John Smith"/></div>
+          <div><div style={{fontSize:11,color:"#5a6070",marginBottom:4}}>Password</div><Input type="password" value={newUser.password} onChange={v=>setNewUser({...newUser,password:v})} placeholder="Strong password"/></div>
+          <div><div style={{fontSize:11,color:"#5a6070",marginBottom:4}}>Role</div>
+            <Select value={newUser.role} onChange={v=>setNewUser({...newUser,role:v})} style={{width:"100%"}}>
+              <option value="admin">Admin — full access</option>
+              <option value="editor">Editor — read + write</option>
+              <option value="viewer">Viewer — read only</option>
+            </Select>
+          </div>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn onClick={()=>setShowAdd(false)}>Cancel</Btn><Btn v="primary" onClick={createUser} disabled={!newUser.username||!newUser.password}>Create</Btn></div>
+        </div>
+      </Modal>}
+
+      {/* Edit user modal */}
+      {editUser&&<Modal onClose={()=>setEditUser(null)}>
+        <h3 style={{fontSize:14,fontWeight:600,color:"#f0f2f5",margin:"0 0 14px"}}>Edit: {editUser.username}</h3>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <div><div style={{fontSize:11,color:"#5a6070",marginBottom:4}}>Role</div>
+            <Select value={editUser.role} onChange={v=>setEditUser({...editUser,role:v})} style={{width:"100%"}}>
+              <option value="admin">Admin</option><option value="editor">Editor</option><option value="viewer">Viewer</option>
+            </Select>
+          </div>
+          <div><div style={{fontSize:11,color:"#5a6070",marginBottom:4}}>New password (leave blank to keep)</div><Input type="password" value={editUser.newPassword||''} onChange={v=>setEditUser({...editUser,newPassword:v})} placeholder="Leave blank to keep current"/></div>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <label style={{display:"flex",alignItems:"center",gap:4,fontSize:12,color:"#8b90a0",cursor:"pointer"}}>
+              <input type="checkbox" checked={editUser.enabled!==false&&editUser.enabled!==0} onChange={e=>setEditUser({...editUser,enabled:e.target.checked})} style={{accentColor:"#e85d24"}}/>
+              Account enabled
+            </label>
+          </div>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            <Btn onClick={()=>setEditUser(null)}>Cancel</Btn>
+            <Btn v="primary" onClick={()=>updateUser(editUser.id, {role:editUser.role, enabled:editUser.enabled!==false&&editUser.enabled!==0, password:editUser.newPassword||undefined})}>Save</Btn>
+          </div>
+        </div>
+      </Modal>}
+    </div>}
+
+    {/* Roles tab */}
+    {tab==="roles"&&<Card>
+      <div style={{fontSize:13,fontWeight:500,color:"#f0f2f5",marginBottom:12}}>Role-based access control</div>
+      <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+        <thead><tr style={{borderBottom:"1px solid #1a1e2c"}}>
+          {["Permission","Admin","Editor","Viewer"].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"center",fontSize:10,color:"#5a6070",fontWeight:500,textTransform:"uppercase"}}>{h}</th>)}
+        </tr></thead>
+        <tbody>
+          {[
+            ["View dashboards, agents, kanban, infra","read"],
+            ["Create & edit agents, cards, workplans","write"],
+            ["Delete agents, cards, components","delete"],
+            ["Run network scans","scan"],
+            ["Manage gateway configs","config"],
+            ["Manage users & system settings","admin"],
+          ].map(([label,perm])=><tr key={perm} style={{borderBottom:"1px solid #12141b"}}>
+            <td style={{padding:"8px 10px",color:"#d4d8e0"}}>{label}</td>
+            {["admin","editor","viewer"].map(role=><td key={role} style={{padding:"8px 10px",textAlign:"center"}}>
+              {(role==='admin'||(['editor'].includes(role)&&['read','write','delete','scan'].includes(perm))||(['viewer'].includes(role)&&perm==='read'))
+                ?<span style={{color:"#22c55e"}}>✓</span>
+                :<span style={{color:"#3a3e50"}}>—</span>}
+            </td>)}
+          </tr>)}
+        </tbody>
+      </table>
+    </Card>}
+
+    {/* System tab */}
+    {tab==="system"&&<Card>
+      <div style={{fontSize:13,fontWeight:500,color:"#f0f2f5",marginBottom:12}}>System information</div>
+      {[
+        ["Install path","/opt/mission-control"],
+        ["Database","SQLite (WAL mode)"],
+        ["Config","/opt/mission-control/.env"],
+        ["Logs","pm2 logs mission-control"],
+      ].map(([k,v])=><div key={k} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #12141b",fontSize:12}}>
+        <span style={{color:"#5a6070"}}>{k}</span><span className="mono" style={{color:"#d4d8e0",fontSize:11}}>{v}</span>
+      </div>)}
+    </Card>}
   </div>;
 }

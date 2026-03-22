@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useRouter } from "next/router";
 
 export default function Login() {
+  const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -15,12 +16,12 @@ export default function Login() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ username, password }),
       });
       const data = await res.json();
       if (res.ok && data.token) {
-        // Store token for WebSocket auth (cookie is set httpOnly by server)
         sessionStorage.setItem("mc_token", data.token);
+        sessionStorage.setItem("mc_user", JSON.stringify(data.user || {}));
         router.push("/");
       } else {
         setError(data.error || "Login failed");
@@ -30,6 +31,8 @@ export default function Login() {
     }
     setLoading(false);
   };
+
+  const s = { input: { width: "100%", padding: "10px 14px", background: "#090b0f", border: "1px solid #1a1e2c", borderRadius: 8, color: "#d4d8e0", fontSize: 13, outline: "none", marginBottom: 12, boxSizing: "border-box" } };
 
   return (
     <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#0a0c10", color: "#d4d8e0", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -41,20 +44,10 @@ export default function Login() {
           <p style={{ fontSize: 12, color: "#5a6070", marginTop: 4 }}>OpenClaw Fleet Orchestrator</p>
         </div>
         <form onSubmit={handleLogin}>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Admin password"
-            autoFocus
-            style={{ width: "100%", padding: "10px 14px", background: "#090b0f", border: "1px solid #1a1e2c", borderRadius: 8, color: "#d4d8e0", fontSize: 13, outline: "none", marginBottom: 12, boxSizing: "border-box" }}
-          />
+          <input value={username} onChange={e => setUsername(e.target.value)} placeholder="Username" autoFocus style={s.input} />
+          <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Password" style={s.input} />
           {error && <div style={{ color: "#ef4444", fontSize: 12, marginBottom: 12 }}>{error}</div>}
-          <button
-            type="submit"
-            disabled={loading || !password}
-            style={{ width: "100%", padding: "10px 14px", background: "#2a1508", border: "1px solid #4a2812", borderRadius: 8, color: "#e85d24", fontSize: 13, fontWeight: 500, cursor: loading ? "wait" : "pointer", opacity: loading || !password ? 0.5 : 1 }}
-          >
+          <button type="submit" disabled={loading || !password} style={{ width: "100%", padding: "10px 14px", background: "#2a1508", border: "1px solid #4a2812", borderRadius: 8, color: "#e85d24", fontSize: 13, fontWeight: 500, cursor: loading ? "wait" : "pointer", opacity: loading || !password ? 0.5 : 1 }}>
             {loading ? "Authenticating..." : "Sign in"}
           </button>
         </form>

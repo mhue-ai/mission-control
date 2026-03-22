@@ -127,6 +127,14 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_wp_phase_workplan ON workplan_phases(workplan_id);
   CREATE INDEX IF NOT EXISTS idx_config_backups_gw ON config_backups(gateway_id);
 
+  -- Agent configs (pulled from live gateways)
+  CREATE TABLE IF NOT EXISTS agent_configs (
+    agent_id TEXT PRIMARY KEY,
+    config_json TEXT NOT NULL,
+    config_hash TEXT,
+    pulled_at TEXT DEFAULT (datetime('now'))
+  );
+
   -- Prune old events (keep 30 days by default)
   DELETE FROM events WHERE created_at < datetime('now', '-30 days');
 `);

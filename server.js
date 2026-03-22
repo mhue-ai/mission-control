@@ -45,6 +45,7 @@ const { InfrastructureRegistry } = require('./lib/infrastructure-registry');
 const { registerInfraRoutes } = require('./lib/infra-routes');
 const { AgentStore } = require('./lib/agent-store');
 const { KanbanStore } = require('./lib/kanban-store');
+const { runNetworkScan, getLocalSubnet, hasNmap } = require('./lib/network-scanner');
 const log = require('./lib/logger');
 
 const dev = process.env.NODE_ENV !== 'production';
@@ -64,7 +65,7 @@ require('./scripts/setup-db');
 
 // ─── Services ─────────────────────────────────────────────────────
 const connector = new GatewayConnector();
-const auth = new AuthMiddleware();
+const auth = new AuthMiddleware(db);
 const workplanStore = new WorkplanStore(db);
 const executionEngine = new ExecutionEngine(connector, db);
 const watchdog = new AgentWatchdog(connector, db, {
@@ -165,6 +166,65 @@ app.prepare().then(() => {
       }
       if (pathname === '/api/auth/logout' && req.method === 'POST') {
         return auth.handleLogout(req, res);
+      }
+      if (pathname === '/api/auth/me' && req.method === 'GET') {
+        return auth.handleMe(req, res);
+      }
+
+      // ─── User management (admin only) ──────────────────
+      if (pathname === '/api/users' && req.method === 'GET') {
+        return json(res, 200, auth.listUsers());
+      }
+      if (pathname === '/api/users' && req.method === 'POST') {
+        return readBody(req, async (body) => {
+          try {
+            const user = await auth.createUser(body);
+            json(res, 201, user);
+          } catch (e) { json(res, 400, { error: e.message }); }
+        });
+      }
+      if (pathname.match(/^\/api\/users\/[^/]+$/) && req.method === 'PATCH') {
+        const id = pathname.split('/').pop();
+        return readBody(req, async (body) => {
+          try {
+            const user = await auth.updateUser(id, body);
+            user ? json(res, 200, user) : json(res, 404, { error: 'Not found' });
+          } catch (e) { json(res, 400, { error: e.message }); }
+        });
+      }
+      if (pathname.match(/^\/api\/users\/[^/]+$/) && req.method === 'DELETE') {
+        const id = pathname.split('/').pop();
+        try { auth.deleteUser(id); return json(res, 200, { ok: true }); }
+        catch (e) { return json(res, 400, { error: e.message }); }
+      }
+
+      // ─── Pull agent config from live gateway ───────────
+      if (pathname.match(/^\/api\/agents\/[^/]+\/pull-config$/) && req.method === 'POST') {
+        const agentId = pathname.split('/')[3];
+        const agent = agentStore.getAgent(agentId);
+        if (!agent) return json(res, 404, { error: 'Agent not found' });
+        if (!agent.gateway_id) return json(res, 400, { error: 'Agent has no gateway assigned' });
+        connector.getConfig(agent.gateway_id).then(config => {
+          const normalized = {
+            raw: config?.payload || config,
+            hash: config?.hash || null,
+            pulledAt: new Date().toISOString(),
+            gatewayVersion: connector.gateways.get(agent.gateway_id)?.state?.version || null,
+          };
+          agentStore.updateAgent(agentId, {
+            model: config?.payload?.agents?.defaults?.model?.primary || agent.model,
+            workspace: config?.payload?.agents?.defaults?.workspace || agent.workspace,
+          });
+          db.prepare(`INSERT OR REPLACE INTO agent_configs (agent_id, config_json, config_hash, pulled_at) VALUES (?, ?, ?, datetime('now'))`).run(agentId, JSON.stringify(normalized.raw), normalized.hash);
+          json(res, 200, { ok: true, config: normalized });
+        }).catch(e => json(res, 500, { error: `Config pull failed: ${e.message}` }));
+        return;
+      }
+      if (pathname.match(/^\/api\/agents\/[^/]+\/config$/) && req.method === 'GET') {
+        const agentId = pathname.split('/')[3];
+        const row = db.prepare(`SELECT * FROM agent_configs WHERE agent_id=?`).get(agentId);
+        if (!row) return json(res, 404, { error: 'No saved config. Pull from gateway first.' });
+        return json(res, 200, { agentId, config: JSON.parse(row.config_json), hash: row.config_hash, pulledAt: row.pulled_at });
       }
 
       // ─── Health (public) ───────────────────────────────
@@ -406,6 +466,19 @@ app.prepare().then(() => {
         if (handled) return;
       }
 
+      // ─── Network scan ──────────────────────────────────
+      if (pathname === '/api/infra/scan' && req.method === 'POST') {
+        return readBody(req, async (body) => {
+          try {
+            const result = await runNetworkScan(infraRegistry, { subnet: body.subnet });
+            json(res, 200, result);
+          } catch (e) { json(res, 500, { error: e.message }); }
+        });
+      }
+      if (pathname === '/api/infra/scan/info' && req.method === 'GET') {
+        return json(res, 200, { subnet: getLocalSubnet(), nmapAvailable: hasNmap() });
+      }
+
       // ─── Managed Agents ─────────────────────────────────
       if (pathname === '/api/agents' && req.method === 'GET') {
         return json(res, 200, agentStore.listAgents());
@@ -620,7 +693,14 @@ function readBody(req, cb) {
   let body = '';
   req.on('data', chunk => body += chunk);
   req.on('end', () => {
-    try { cb(JSON.parse(body)); }
-    catch (e) { json(req.res || arguments[1], 400, { error: 'Invalid JSON' }); }
+    try {
+      const parsed = JSON.parse(body);
+      const result = cb(parsed);
+      // Handle async callbacks — catch rejected promises
+      if (result && typeof result.catch === 'function') {
+        result.catch(e => { /* errors handled inside cb */ });
+      }
+    }
+    catch (e) { /* JSON parse error — response already sent or will be */ }
   });
 }
